@@ -16,8 +16,10 @@ from bilstm import Model as BiLSTM
 from time import strftime
 from datetime import datetime
 import shutil
+# from sklearn.metrics import precision_recall_fscore_support
 FLAGS = tf.app.flags.FLAGS
 
+tf.app.flags.DEFINE_bool('delete_log', 'False', 'tensorflow model path')
 tf.app.flags.DEFINE_string('train_data_path', "newcorpus/2014_train.txt",
                            'Training data dir')
 tf.app.flags.DEFINE_string('test_data_path', "newcorpus/2014_test.txt",
@@ -26,17 +28,17 @@ tf.app.flags.DEFINE_string('log_dir', "logs", 'The log  dir')
 tf.app.flags.DEFINE_string("word2vec_path", "newcorpus/vec.txt",
                            "the word2vec data path")
 
-tf.app.flags.DEFINE_integer("max_sentence_len", 80,
+tf.app.flags.DEFINE_integer("max_sentence_len", 100,
                             "max num of tokens per query")
 tf.app.flags.DEFINE_integer("embedding_size", 50, "embedding size")
-tf.app.flags.DEFINE_integer("num_tags", 4, "BMES")
-tf.app.flags.DEFINE_integer("num_hidden", 100, "hidden unit number")
-tf.app.flags.DEFINE_integer("batch_size", 100, "num example per mini batch")
+tf.app.flags.DEFINE_integer("num_tags", 24, "tag number")
+tf.app.flags.DEFINE_integer("num_hidden", 140, "hidden unit number")
+tf.app.flags.DEFINE_integer("batch_size", 50, "num example per mini batch")
 tf.app.flags.DEFINE_integer("train_steps", 150000, "trainning steps")
 tf.app.flags.DEFINE_float("learning_rate", 0.001, "learning rate")
-tf.app.flags.DEFINE_bool("use_idcnn", True, "whether use the idcnn")
+tf.app.flags.DEFINE_bool("use_idcnn", False, "whether use the idcnn")
 tf.app.flags.DEFINE_integer("track_history", 6, "track max history accuracy")
-tf.app.flags.DEFINE_bool('reload', True, 'if reload model or not')
+
 
 def do_load_data(path):
     '''
@@ -50,7 +52,7 @@ def do_load_data(path):
         if not line:
             continue
         ss = line.split(" ")
-        assert (len(ss) == (FLAGS.max_sentence_len * 2))
+        assert (len(ss) == (FLAGS.max_sentence_len * 2)), 'ss len:{} mex len:{}'.format(len(ss), FLAGS.max_sentence_len * 2)
         lx = []
         ly = []
         for i in range(FLAGS.max_sentence_len):
@@ -114,8 +116,11 @@ class Model:
 
     def loss(self, X, Y):
         P, sequence_length = self.inference(X)
+        self.P = P
+        self.realY = Y
         log_likelihood, self.transition_params = tf.contrib.crf.crf_log_likelihood(
             P, Y, sequence_length)
+        self.log_likelihood = log_likelihood
         loss = tf.reduce_mean(-log_likelihood)
         return loss
 
@@ -188,6 +193,32 @@ def read_csv(batch_size, file_name):
 
 def test_evaluate(sess, unary_score, test_sequence_length, transMatrix, inp,
                   tX, tY):
+    y_label_dict = {}
+
+    def classify_report():
+        # target_names = ['B', 'I', 'E', 'S', 'O']
+        for k, v in y_label_dict.items():
+            precision = v['TP'] / (v['TP'] + v['FP'])
+            recall = v['TP'] / (v['TP'] + v['FN'])
+            F1 = 2 * recall * precision / (recall + precision)
+            print('{} precision:{:.4f} recall:{:.4f} F1:{:.4f}'.format(k, precision, recall, F1))
+
+    def count_label(y_pre, y_true, label_dict):
+        if len(y_pre) != len(y_true):
+            print(len(y_pre), len(y_true))
+            return
+        for index, y_p in enumerate(y_pre):
+            y_label_dict.setdefault(y_p, {})
+            if y_pre[index] == y_true[index]:  # TP
+                y_label_dict[y_p].setdefault('TP', 0)
+                y_label_dict[y_p]['TP'] += 1
+            else:
+                y_label_dict[y_p].setdefault('FP', 0)
+                y_label_dict[y_p]['FP'] += 1
+                y_label_dict.setdefault(y_true[index], {})
+                y_label_dict[y_true[index]].setdefault('FN', 0)  # FN
+                y_label_dict[y_true[index]]['FN'] += 1
+
     totalEqual = 0
     batchSize = FLAGS.batch_size
     totalLen = tX.shape[0]
@@ -202,6 +233,7 @@ def test_evaluate(sess, unary_score, test_sequence_length, transMatrix, inp,
         feed_dict = {inp: tX[i * batchSize:endOff]}
         unary_score_val, test_sequence_length_val = sess.run(
             [unary_score, test_sequence_length], feed_dict)
+
         for tf_unary_scores_, y_, sequence_length_ in zip(
                 unary_score_val, y, test_sequence_length_val):
             # print("seg len:%d" % (sequence_length_))
@@ -212,8 +244,11 @@ def test_evaluate(sess, unary_score, test_sequence_length, transMatrix, inp,
             # Evaluate word-level accuracy.
             correct_labels += np.sum(np.equal(viterbi_sequence, y_))
             total_labels += sequence_length_
+            # count_label(viterbi_sequence, y_, y_label_dict)
+            # print(y_, viterbi_sequence)
     accuracy = 100.0 * correct_labels / float(total_labels)
-    print("Accuracy: %.3f%%" % accuracy)
+    # classify_report()
+    print("Accuracy: {} curret label:{} total label:{}".format(accuracy, correct_labels, total_labels), flush=True)
     return accuracy
 
 
@@ -225,16 +260,19 @@ def inputs(path):
 
 
 def train(total_loss):
-    return tf.train.AdamOptimizer(FLAGS.learning_rate).minimize(total_loss)
+    optimizer = tf.train.AdamOptimizer(FLAGS.learning_rate)
+    gvs = [v for v in tf.trainable_variables()]
+    gvs_gredient = optimizer.compute_gradients(total_loss, var_list=gvs)
+    capped_gvs_predict = [(tf.clip_by_norm(grad, 5), var) for grad, var in gvs_gredient if grad is not None]
+    return optimizer.apply_gradients(capped_gvs_predict)
 
 
 def main(unused_argv):
     '''
     call by tf.app.run
     '''
-    if not FLAGS.reload:
-        if os.path.exists(FLAGS.log_dir):
-            shutil.rmtree(FLAGS.log_dir)
+    # if os.path.exists(FLAGS.log_dir):
+    #     shutil.rmtree(FLAGS.log_dir)
 
     curdir = os.path.dirname(os.path.realpath(__file__))
     trainDataPath = tf.app.flags.FLAGS.train_data_path
@@ -262,12 +300,17 @@ def main(unused_argv):
                 try:
                     _, trainsMatrix = sess.run(
                         [train_op, model.transition_params])
+                    # real_X, real_Y, unary_score, log_likelihood, loss, transition = sess.run([X, model.realY, model.P, model.log_likelihood, total_loss, model.transition_params])
+                    # print(loss)
+                    # for unary_score_, y_ in zip(unary_score, real_Y):
+
+                        # viterbi_sequence, _ = tf.contrib.crf.viterbi_decode(unary_score_, trainsMatrix)
+                        # print(viterbi_sequence, y_)
                     # for debugging and learning purposes, see how the loss
                     # gets decremented thru training steps
                     now_time = datetime.now().strftime('%H:%M:%S')
                     if (step + 1) % 100 == 0:
-                        print("%s [%d] loss: [%r]" %
-                              (now_time, step + 1, sess.run(total_loss)))
+                        print('{} [{}] loss: {}'.format(now_time, step + 1, sess.run(total_loss)), flush=True)
                     if (step + 1) % 1000 == 0 or step == 0:
                         acc = test_evaluate(sess, test_unary_score,
                                             test_sequence_length, trainsMatrix,

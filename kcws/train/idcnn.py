@@ -67,6 +67,7 @@ class Model:
                             totalWidthForLastDim += self.num_filter
                         layerInput = conv
             finalOut = tf.concat(axis=3, values=finalOutFromLayers)
+            # print(finalOut.shape.as_list())
             keepProb = 1.0 if reuse else 0.5
             finalOut = tf.nn.dropout(finalOut, keepProb)
 

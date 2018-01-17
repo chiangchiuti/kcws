@@ -4,30 +4,26 @@
 # @Last Modified by:   Koth
 # @Last Modified time: 2017-04-07 23:02:50
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import numpy as np
 
 import tensorflow as tf
 import os
+import shutil
 
 FLAGS = tf.app.flags.FLAGS
-
-tf.app.flags.DEFINE_string('train_data_path', "pos/train.txt",
+tf.app.flags.DEFINE_string('train_data_path', "product_name/train_for_train.txt",
                            'Training data dir')
-tf.app.flags.DEFINE_string('test_data_path', "pos/test.txt", 'Test data dir')
-tf.app.flags.DEFINE_string('log_dir', "pos_logs", 'The log  dir')
-tf.app.flags.DEFINE_string("word_word2vec_path", "pos/word_vec.txt",
+tf.app.flags.DEFINE_string('test_data_path', "product_name/train_for_test.txt", 'Test data dir')
+tf.app.flags.DEFINE_string('log_dir', "product_name/product_logs", 'The log  dir')
+tf.app.flags.DEFINE_string("word_word2vec_path", "product_name/word_vec.txt",
                            "the word2vec data path")
-tf.app.flags.DEFINE_string("char_word2vec_path", "pos/char_vec.txt",
+tf.app.flags.DEFINE_string("char_word2vec_path", "product_name/vec.txt",
                            "the charater word2vec data path")
-tf.app.flags.DEFINE_integer("max_sentence_len", 50,
+tf.app.flags.DEFINE_integer("max_sentence_len", 40,
                             "max num of tokens per query")
 tf.app.flags.DEFINE_integer("embedding_word_size", 150, "embedding size")
 tf.app.flags.DEFINE_integer("embedding_char_size", 50, "second embedding size")
-tf.app.flags.DEFINE_integer("num_tags", 74, "num pos tags")
+tf.app.flags.DEFINE_integer("num_tags", 5, "num pos tags")
 tf.app.flags.DEFINE_integer("char_window_size", 2,
                             "the window size of char convolution")
 tf.app.flags.DEFINE_integer("max_chars_per_word", 5,
@@ -79,8 +75,8 @@ class Model:
         self.numHidden = numHidden
         self.w2v = self.load_w2v(w2vPath, FLAGS.embedding_word_size)
         self.c2v = self.load_w2v(c2vPath, FLAGS.embedding_char_size)
-        self.words = tf.Variable(self.w2v, name="words")
-        self.chars = tf.Variable(self.c2v, name="chars")
+        self.words = tf.Variable(self.w2v, name="words")  # 10745, 150
+        self.chars = tf.Variable(self.c2v, name="chars")  # 5692, 50
         with tf.variable_scope('Softmax') as scope:
             self.W = tf.get_variable(
                 shape=[numHidden * 2, distinctTagNum],
@@ -92,7 +88,7 @@ class Model:
             self.filter = tf.get_variable(
                 "filters_1",
                 shape=[2, FLAGS.embedding_char_size, 1,
-                       FLAGS.embedding_char_size],
+                       FLAGS.embedding_char_size],  # [filter_height, filter_width, in_channels, out_channels]
                 regularizer=tf.contrib.layers.l2_regularizer(0.0001),
                 initializer=tf.truncated_normal_initializer(stddev=0.01),
                 dtype=tf.float32)
@@ -113,9 +109,12 @@ class Model:
         return length
 
     def char_convolution(self, vecs):
+        '''
+        @vec: 64, 5, 50 ,1
+        '''
         conv1 = tf.nn.conv2d(vecs,
                              self.filter, [1, 1, FLAGS.embedding_char_size, 1],
-                             padding='VALID')
+                             padding='VALID')  # 64, 4, 1, 50
         conv1 = tf.nn.relu(conv1)
         pool1 = tf.nn.max_pool(
             conv1,
@@ -123,38 +122,44 @@ class Model:
                    1],
             strides=[1, FLAGS.max_chars_per_word - FLAGS.char_window_size + 1,
                      1, 1],
-            padding='SAME')
-        pool1 = tf.squeeze(pool1, [1, 2])
+            padding='SAME')  # 64, 1, 1, 50
+        pool1 = tf.squeeze(pool1, [1, 2])  # 64, 50
         return pool1
 
     def inference(self, wX, cX, reuse=None, trainMode=True):
-        word_vectors = tf.nn.embedding_lookup(self.words, wX)
-        char_vectors = tf.nn.embedding_lookup(self.chars, cX)
+        # print(cX.get_shape().as_list())
+        word_vectors = tf.nn.embedding_lookup(self.words, wX)  # 64, 40, 150 (batch_size, max_sentence_len, embedding_word_size)
+        char_vectors = tf.nn.embedding_lookup(self.chars, cX)  # 64, 200, 50 where 200 = 40 * 5
+        # print(char_vectors.get_shape().as_list())
         char_vectors = tf.reshape(char_vectors, [-1, FLAGS.max_sentence_len,
                                                  FLAGS.embedding_char_size,
-                                                 FLAGS.max_chars_per_word])
-        char_vectors = tf.transpose(char_vectors, perm=[1, 0, 3, 2])
-        char_vectors = tf.expand_dims(char_vectors, -1)
+                                                 FLAGS.max_chars_per_word])  # 64, 40, 50, 5
+        # print(char_vectors.get_shape().as_list())
+        char_vectors = tf.transpose(char_vectors, perm=[1, 0, 3, 2])  # 40, 64, 5, 50 (max_sentence_len, batch_size, max_char_per_word, embedding_char_size)
+        # print(char_vectors.get_shape().as_list())
+        char_vectors = tf.expand_dims(char_vectors, -1)  # 40, 64, 5, 50, 1
+        # print(char_vectors.get_shape().as_list())
         length = self.length(wX)
         length_64 = tf.cast(length, tf.int64)
 
         # do conv
-        def do_char_conv(x): return self.char_convolution(x)
-        char_vectors_x = tf.map_fn(do_char_conv, char_vectors)
-        char_vectors_x = tf.transpose(char_vectors_x, perm=[1, 0, 2])
-        word_vectors = tf.concat([word_vectors, char_vectors_x], axis=2)
+        def do_char_conv(x):
+            return self.char_convolution(x)
+        char_vectors_x = tf.map_fn(do_char_conv, char_vectors)  # 40, 64, 50
+        char_vectors_x = tf.transpose(char_vectors_x, perm=[1, 0, 2])  # 64, 40, 50
+        word_vectors = tf.concat([word_vectors, char_vectors_x], axis=2)  # (64, 40, 150) and (64, 40, 50)
         # if trainMode:
         #  word_vectors = tf.nn.dropout(word_vectors, 0.5)
         reuse = None if trainMode else True
         with tf.variable_scope("rnn_fwbw", reuse=reuse) as scope:
-            forward_output, _ = tf.nn.dynamic_rnn(
+            forward_output, forward_state = tf.nn.dynamic_rnn(
                 tf.contrib.rnn.LSTMCell(self.numHidden,
                                         reuse=reuse),
                 word_vectors,
                 dtype=tf.float32,
                 sequence_length=length,
                 scope="RNN_forward")
-            backward_output_, _ = tf.nn.dynamic_rnn(
+            backward_output_, backward_state = tf.nn.dynamic_rnn(
                 tf.contrib.rnn.LSTMCell(self.numHidden,
                                         reuse=reuse),
                 inputs=tf.reverse_sequence(word_vectors,
@@ -166,19 +171,18 @@ class Model:
 
         backward_output = tf.reverse_sequence(backward_output_,
                                               length_64,
-                                              seq_dim=1)
+                                              seq_dim=1)  # 64, 40, 100
 
         output = tf.concat([forward_output, backward_output], 2)
-        output = tf.reshape(output, [-1, self.numHidden * 2])
+        output = tf.reshape(output, [-1, self.numHidden * 2])  # 2560, 200
         if trainMode:
             output = tf.nn.dropout(output, 0.5)
 
-        matricized_unary_scores = tf.matmul(output, self.W) + self.b
+        matricized_unary_scores = tf.matmul(output, self.W) + self.b  # 2560, 5
         # matricized_unary_scores = tf.nn.log_softmax(matricized_unary_scores)
         unary_scores = tf.reshape(
             matricized_unary_scores,
-            [-1, FLAGS.max_sentence_len, self.distinctTagNum])
-
+            [-1, FLAGS.max_sentence_len, self.distinctTagNum])  # 64, 40, 5
         return unary_scores, length
 
     def loss(self, wX, cX, Y):
@@ -302,6 +306,8 @@ def train(total_loss):
 
 
 def main(unused_argv):
+    # if os.path.exists(FLAGS.log_dir):
+    #     shutil.rmtree(FLAGS.log_dir)
     curdir = os.path.dirname(os.path.realpath(__file__))
     trainDataPath = tf.app.flags.FLAGS.train_data_path
     if not trainDataPath.startswith("/"):
@@ -311,8 +317,8 @@ def main(unused_argv):
         model = Model(FLAGS.num_tags, FLAGS.word_word2vec_path,
                       FLAGS.char_word2vec_path, FLAGS.num_hidden)
         print("train data path:", trainDataPath)
-        wX, cX, Y = inputs(trainDataPath)
-        twX, tcX, tY = do_load_data(tf.app.flags.FLAGS.test_data_path)
+        wX, cX, Y = inputs(trainDataPath)  # training data
+        twX, tcX, tY = do_load_data(tf.app.flags.FLAGS.test_data_path)  # testing data
         total_loss = model.loss(wX, cX, Y)
         train_op = train(total_loss)
         test_unary_score, test_sequence_length = model.test_unary_score()

@@ -51,7 +51,7 @@ class Sentence:
       wordi.append("0")
       labeli.append("0")
       for ii in range(5):
-        chari.append(str(ii))
+        chari.append(str(ii))  # something wrong??
     line = " ".join(wordi)
     line += " "
     line += " ".join(chari)

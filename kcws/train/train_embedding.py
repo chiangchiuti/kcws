@@ -11,6 +11,7 @@ from __future__ import print_function
 import numpy as np
 import tensorflow as tf
 from tensorflow.contrib import learn
+from time import gmtime, strftime
 import os
 
 FLAGS = tf.app.flags.FLAGS
@@ -202,7 +203,8 @@ def main(unused_argv):
           _ = sess.run([train_op])
           # for debugging and learning purposes, see how the loss gets decremented thru training steps
           if step % 100 == 0:
-            print("[%d] loss: [%r]" % (step, sess.run(total_loss)))
+            now_time = strftime("%H:%M:%S", gmtime())
+            print("%s [%d] loss: [%r]" % (now_time, step, sess.run(total_loss)))
           if step % 1000 == 0:
             test_evaluate(sess, calc_correct_op, model.inp, model.tp, tX, tY)
         except KeyboardInterrupt, e:

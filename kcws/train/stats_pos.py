@@ -108,6 +108,12 @@ def main(argc, argv):
     for k, v in posMap.iteritems():
         tagvobFp.write("%s\t%d\n" % (k, idx + 1))
         idx += 1
+    tagvobFp.close()
+
+    # statistic word frequency
+    with open('pos_freq.txt', 'w') as w:
+        for k, v in posMap.iteritems():
+            w.write('{}\t{:d}\n'.format(k, v))
 
 
 if __name__ == '__main__':

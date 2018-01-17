@@ -24,22 +24,22 @@ class Sentence:
         self.chars = 0
 
     # label -1, unknown
-    # 0-> 'S'
-    # 1-> 'B'
-    # 2-> 'M'
-    # 3-> 'E'
+    # 0-> 'S'  single
+    # 1-> 'B'  begin
+    # 2-> 'M' middle
+    # 3-> 'E'  end
     def generate_tr_line(self, x, y, vob):
         for t in self.tokens:
-            if len(t) == 1:
-                x.append(vob.GetWordIndex(str(t[0].encode("utf8"))))
-                y.append(0)
+            if len(t) == 1:  # this token only have one word
+                x.append(vob.GetWordIndex(str(t[0].encode("utf8"))))  # find the corresponding vector of the word
+                y.append(0)  # S
             else:
                 nn = len(t)
                 for i in range(nn):
                     x.append(vob.GetWordIndex(str(t[i].encode("utf8"))))
                     if i == 0:
-                        y.append(1)
+                        y.append(1)  # B
                     elif i == (nn - 1):
-                        y.append(3)
+                        y.append(3)  # E
                     else:
-                        y.append(2)
+                        y.append(2)  # M

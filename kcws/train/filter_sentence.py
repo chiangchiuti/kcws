@@ -11,7 +11,7 @@ def main(argc, argv):
     if argc < 2:
         print("Usage:%s <input>" % (argv[0]))
         sys.exit(1)
-    SENTENCE_LEN = 80
+    SENTENCE_LEN = 140
     fp = open(argv[1], "r")
     nl = 0
     bad = 0
@@ -26,7 +26,6 @@ def main(argc, argv):
         if not line:
             continue
         ss = line.split(' ')
-
         if len(ss) != (2 * SENTENCE_LEN):
             print("len is:%d" % (len(ss)))
             continue
@@ -36,7 +35,7 @@ def main(argc, argv):
                 numV += 1
                 if numV > 2:
                     break
-        if numV <= 2:
+        if numV <= 2:  # too much 0 index
             bad += 1
         else:
             r = random.random()

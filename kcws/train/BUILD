@@ -39,3 +39,22 @@ py_binary(
     data = ["//utils:w2v.so"],
     imports = ["../../utils"],
 )
+
+py_binary(
+    name = "generate_tag_train",
+    srcs = ["generate_tag_train.py"],
+    data = ["//utils:w2v.so"],
+    imports = ["../../utils"],
+)
+py_binary(
+    name = "generate_ner_train",
+    srcs = ["generate_ner_train.py"],
+    data = ["//utils:w2v.so"],
+    imports = ["../../utils"],
+)
+py_binary(
+    name = "generate_training_with_multi_criteria",
+    srcs = ["generate_training_with_multi_criteria.py"],
+    data = ["//utils:w2v.so"],
+    imports = ["../../utils"],
+)

@@ -22,11 +22,11 @@ def processToken(token, sentence, out, end, vob):
     global totalChars
     global MAX_LEN
     nn = len(token)
-    while nn > 0 and token[nn - 1] != '/':
+    while nn > 0 and token[nn - 1] != '/':  # find the tagging index
         nn = nn - 1
 
     token = token[:nn - 1].strip()
-    if token != '。':
+    if token != '。':  # if token is not the end of sentance
         ustr = unicode(token.decode('utf8'))
         sentence.addToken(ustr)
     uline = u''
@@ -34,19 +34,19 @@ def processToken(token, sentence, out, end, vob):
         if sentence.chars > MAX_LEN:
             longLine += 1
         else:
-            x = []
-            y = []
+            x = []  # store vector
+            y = []  # store tag
             totalChars += sentence.chars
             sentence.generate_tr_line(x, y, vob)
             nn = len(x)
-            assert (nn == len(y))
+            assert (nn == len(y))  # len of x and len of y should be the same
             for j in range(nn, MAX_LEN):
-                x.append(0)
+                x.append(0)  # fill 0 until maxlen
                 y.append(0)
-            line = ''
+            line = ''  # initial
             for i in range(MAX_LEN):
                 if i > 0:
-                    line += " "
+                    line += " "  # split with space
                 line += str(x[i])
             for j in range(MAX_LEN):
                 line += " " + str(y[j])
